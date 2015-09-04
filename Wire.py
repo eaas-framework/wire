@@ -644,22 +644,38 @@ def l4manage(ethhead, filedescriptor):
     # Check for commands and take the according action.
     # If there is data sent with the packet, forward it to the socket.
     # TODO: __str__ of headers is very expensive.
-    if len(str(tcphead.child())) > 0:
+    datalen = len(str(tcphead.child()))
+    if datalen > 0:
         data = tcphead.child()
     else:
         data = None
 
-    # If FIN and ACK are set, tell the connection.
+    # If FIN and ACK are set, tell the connection to init the finish procedure.
     if tcphead.get_FIN() and tcphead.get_ACK():
-        if verbosity:
-            logfile.write("FIN/ACK received!\n")
-            logfile.write("Seq: " + str(tcphead.get_th_seq()) + "\n")
-            logfile.write("Ack: " + str(tcphead.get_th_ack()) + "\n")
-        con.ack(source, tcphead.get_th_ack())
-        con.fin(source)
+        if not data:
+            if verbosity:
+                logfile.write("FIN/ACK received!\n")
+                logfile.write("Seq: " + str(tcphead.get_th_seq()) + "\n")
+                logfile.write("Ack: " + str(tcphead.get_th_ack()) + "\n")
+            con.ack(source, tcphead.get_th_ack())
+            con.fin(source)
+        # If data exists in the FIN/ACK package, process it before closing.
+        elif data and target == Connection.HEAD:
+            tcphead.reset_FIN()
+            new_packet = con.makevalid(ethhead)
+            new_packet = cksum(new_packet)
+            new_packet = encode(new_packet)
+            send(target, con, new_packet)
+            con.fin(source, datalen)
+        elif data and target == Connection.TAIL:
+            send(Connection.SOCK, con, getdata(ethhead), 0)
+            con.fin(source, datalen)
+        else:
+            raise ValueError("Faulty FIN procedure.")
         return 0, con
 
-    # If we get a RST/ACK or RST packet, drop the connection and tell the other end.
+    # If we get a RST/ACK or RST packet,
+    # drop the connection and tell the other end.
     elif flags == 20 or flags == 4:
         if verbosity:
             logfile.write("RST Flag set!")
@@ -690,7 +706,6 @@ def l4manage(ethhead, filedescriptor):
         if verbosity:
             logfile.write("Connection closed with FIN. SPort: "
                              + str(con.source[2]) + "\n")
-        # Connection.remove(con)
     if data:
         if verbosity:
             logfile.write("Data packet received! \n")
@@ -1061,7 +1076,7 @@ class Connection():
         Connection.connectionlist.pop(con.source[2])
 
     def tcpenqueue(self, target, packet, acknr):
-        """Method adding the given packet to the retransmission queur of target.
+        """Method adding the given packet to the retransmission queue of target.
         The ACKnr which will delete the entry is the one which is valid at
         calltime of the method."""
         if target == Connection.HEAD:
@@ -1165,7 +1180,7 @@ class Connection():
             if verbosity == 2:
                 logfile.write("winsize tail: " + str(winsize) + '\n')
 
-    def fin(self, source):
+    def fin(self, source, datalen=0):
         """Method managing received FIN by closing the connection in one
         direction."""
         if source == Connection.HEAD:
@@ -1176,14 +1191,18 @@ class Connection():
             shost = self.tail
             thost = self.head
             target = Connection.HEAD
-        # If the sender had status open so far, he was the initiator FIN.
+        # If the sender had status open so far, he was the initiator of FIN.
         if shost.status == Host.STATUS_OPEN:
-            self.sendfin(source, 1)
+            self.sendfin(source, 1, datalen)
             shost.status = Host.STATUS_FIN_WAIT2
             # If the other host is open, schedule a finish procedure.
+            # When data was included in the package, double the waiting time.
             if thost.status == Host.STATUS_OPEN:
                 global finQueue
-                finQueue.put([time(), self, target])
+                if datalen == 0:
+                    finQueue.put([time(), self, target])
+                else:
+                    finQueue.put([time() + finTime, self, target])
         # If the sender was in status CLOSE_WAIT, we initiated the FIN before.
         # He is sending an answer. We simply need to acknowledge it.
         if shost.status == Host.STATUS_CLOSE_WAIT:
@@ -1201,7 +1220,7 @@ class Connection():
                 logfile.write("Head: " + str(self.head.status) + "\n")
                 logfile.write("Tail: " + str(self.tail.status) + "\n")
 
-    def sendfin(self, target, answer):
+    def sendfin(self, target, answer, datalen=0):
         """Method sending a FIN/ACK to target. If answer is set, this should
         be the answer to a received FIN/ACK. Else this is the initiation of
         the connection closing mechanism."""
@@ -1219,7 +1238,7 @@ class Connection():
         tcp.set_th_sport(shost.port)
         tcp.set_th_seq(thost.expectedSeqnr(1))
         if answer:
-            tcp.set_th_ack(thost.expectedAcknr(1))
+            tcp.set_th_ack(thost.expectedAcknr(datalen + 1))
             # Increment seqnr.
             thost.seqnr(1)
         else:
