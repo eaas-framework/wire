@@ -429,7 +429,6 @@ def prefilter(filedescriptor, readdata):
             shost = con.head
         else:
             shost = con.tail
-
         # TCP SeqNr Control
         seqnrstatus = con.validate(source, tcphead.get_th_seq())
         # If we have a valid seqnr, the packet will get processed.
@@ -827,11 +826,17 @@ def tcpipfilter_out(packet):
         if isinstance(child, ImpactPacket.TCP):
             srcp = child.get_th_sport()
             streamtype = 0
+            if verbosity > 9:
+                logfile.write("Streamtype:" + str(streamtype) + " \n")
         elif isinstance(child, ImpactPacket.UDP):
             srcp = child.get_uh_sport()
             streamtype = 1
+            if verbosity > 9:
+                logfile.write("Streamtype:" + str(streamtype) + " \n")
         elif isinstance(child, ImpactPacket.ICMP):
             streamtype = 2
+            if verbosity > 9:
+                logfile.write("Streamtype:" + str(streamtype) + " \n")
             srcp = content.get_ip_src()
         # Test for IP-dest hits.
         if not dstip in ipfilter:
@@ -859,7 +864,8 @@ def tcpipfilter_out(packet):
                     child.set_th_sum(0)
                     child.auto_checksum = 1
                     if verbosity:
-                        logfile.write("Hit on port: " + str(child.get_th_dport()) +'\n')
+                        logfile.write("Hit on port: " + 
+                                      str(child.get_th_dport()) +'\n')
                 # Port not filtered -> drop
                 else:
                     if verbosity:
@@ -946,7 +952,8 @@ def tcpipfilter_in(packet):
             return orgpacket, 1
         else:
             if verbosity:
-                logfile.write("ARP packet from targetip fetched. ARP poisoning..\n")
+                logfile.write("ARP packet from targetip fetched." + 
+                                " ARP poisoning..\n")
             for filterip in ipfilter:
                 content.set_ar_spa(map(int, filterip.split(".")))
                 packet = decpacket.get_packet()
