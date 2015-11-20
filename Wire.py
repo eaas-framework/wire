@@ -176,8 +176,9 @@ def main(path):
             out = inout_map[filedescriptor]
             if filedescriptor == 0 or filedescriptor == 3:
                 ethpacket = decode(readdata)
+                ptype = l34protocolfilter(ethpacket)
                 if filedescriptor == 0:
-                    if l34protocolfilter(ethpacket):
+                    if ptype == Protocol.TCP:
                         if l34filter(ethpacket) == 1:
                             # If we have a match on layer34,
                             # proceed with layer 4 management
@@ -196,12 +197,17 @@ def main(path):
                         else:
                             # Send data to the other end of the wire.
                             send(Connection.TAIL, None, readdata, 0)
+                    elif ptype == Protocol.UDP:
+                        #TODO implement UDP handling.
+                        #remove placeholder afterwards.
+                        send(Connection.TAIL, None, readdata, 0)
+                    # ptype == Protocol.Other
                     else:
                         # Send data to the other end of the wire.
                         send(Connection.TAIL, None, readdata, 0)
                 # filedescriptor == 3
                 else:
-                    if l34protocolfilter(ethpacket):
+                    if ptype == Protocol.TCP:
                         if l34filter(ethpacket, 1):
                             status, con = l4manage(ethpacket,
                                                    filedescriptor)
@@ -222,6 +228,9 @@ def main(path):
                             # Send data to the machine at the head
                             # of the wire.
                             send(Connection.HEAD, None, readdata, 0)
+                    # ptype == (Protocol.UDP or Protocol.Other)
+                    # UDP normally should not be faulty on the answers.
+                    # TODO: maybe UDP causes problems on the inward direction
                     else:
                         # Send data to the machine at the head
                         # of the wire.
@@ -403,82 +412,96 @@ def send(target, con, packet, enqueue=1):
 def prefilter(filedescriptor, readdata):
     """Function taking a quick look at incoming packets. All ACK packets will
     get processed immediately. The rest will get queued as usual."""
+    # Socketdata never is premanaged.
     if not (filedescriptor == 0 or filedescriptor == 3):
         return 1
     ethpacket = decode(readdata)
-    if l34protocolfilter(ethpacket):
-        iphead = ethpacket.child()
-        tcphead = iphead.child()
-        flags = tcphead.get_th_flags()
-        if filedescriptor == 0:
-            reverse = 0
-            source = Connection.HEAD
-            target = Connection.TAIL
-            con = Connection.resolvesrc(tcphead.get_th_sport())
-        # filedescriptor == 3
-        else:
-            reverse = 1
-            source = Connection.TAIL
-            target = Connection.HEAD
-            con = Connection.resolvesrc(tcphead.get_th_dport())
-        # If the connection is unkown yet, enqueue the packet.
-        if not con:
-            return 1
-        # Get the host information.
-        if source == Connection.HEAD:
-            shost = con.head
-        else:
-            shost = con.tail
-        # TCP SeqNr Control
-        seqnrstatus = con.validate(source, tcphead.get_th_seq())
-        # If we have a valid seqnr, the packet will get processed.
-        if seqnrstatus == 0:
-            pass
-        # React to keepalive. Do not enqueue.
-        elif seqnrstatus == 1:
-            if verbosity:
-                logfile.write("Ack: " + str(tcphead.get_th_ack()) + "\n")
-            if verbosity > 9:
-                logfile.write(str(ethpacket) + "\n")
-            con.sendack(source, 0, 1)
-            return 0
-        # Invalid packets do not get analysed at all.
-        else:
-            return 0
+    # Obtain the protocol type.
+    ptype = l34protocolfilter(ethpacket)
+    if ptype == Protocol.TCP:
+        return preTCP(ethpacket, filedescriptor)
+    elif ptype == Protocol.UDP:
+        return preUDP(ethpacket)
+    # ptype == Protocol.Other
+    else:
+        return 1
 
-        # If we received data, the expected seqnr need to be counter up.
-        datalength = tcphead.child().get_size()
-        shost.seqnr(datalength)
-        # We only need to take  further action, if we have an ACK packet
-        # without data. Everything else gets enqueued as usual.
-        if flags == 16 and len(str(tcphead.child())) == 0:
-            # We now know we have an ACK for a known connection.
-            # Check the host-state now and take according action. The packet
-            # will not get enqueued since we process it here.
-            if shost.status == Host.STATUS_FIN_WAIT2:
-                shost.status = Host.STATUS_CLOSED
-                con.ack(source, tcphead.get_th_ack())
-                if verbosity:
-                    logfile.write("Received last ACK.\n")
-                    logfile.write("Seq: "
-                                     + str(tcphead.get_th_seq()) + "\n")
-                    logfile.write("Ack: "
-                                     + str(tcphead.get_th_ack()) + "\n")
-                    logfile.write("Connection status:\n")
-                    logfile.write("Head: " + str(con.head.status) + "\n")
-                    logfile.write("Tail: " + str(con.tail.status) + "\n")
-                return 0
-            # Host is active.
-            else:
-                if verbosity:
-                    logfile.write("ACK received: \n")
-                    logfile.write("Seq: " + str(tcphead.get_th_seq()) + "\n")
-                con.ack(source, tcphead.get_th_ack())
-                if verbosity > 9:
-                    logfile.write(str(ethpacket) + "\n")
-                return 0
+def preUDP(ethpacket):
+    # TODO: Implement preOperations for UDP
     return 1
 
+def preTCP(ethpacket, filedescriptor):
+    iphead = ethpacket.child()
+    tcphead = iphead.child()
+    flags = tcphead.get_th_flags()
+    if filedescriptor == 0:
+        reverse = 0
+        source = Connection.HEAD
+        target = Connection.TAIL
+        con = Connection.resolvesrc(tcphead.get_th_sport())
+    # filedescriptor == 3
+    else:
+        reverse = 1
+        source = Connection.TAIL
+        target = Connection.HEAD
+        con = Connection.resolvesrc(tcphead.get_th_dport())
+    # If the connection is unkown yet, enqueue the packet.
+    if not con:
+        return 1
+    # Get the host information.
+    if source == Connection.HEAD:
+        shost = con.head
+    else:
+        shost = con.tail
+    # TCP SeqNr Control
+    seqnrstatus = con.validate(source, tcphead.get_th_seq())
+    # If we have a valid seqnr, the packet will get processed.
+    if seqnrstatus == 0:
+        pass
+    # React to keepalive. Do not enqueue.
+    elif seqnrstatus == 1:
+        if verbosity:
+            logfile.write("Ack: " + str(tcphead.get_th_ack()) + "\n")
+        if verbosity > 9:
+            logfile.write(str(ethpacket) + "\n")
+        con.sendack(source, 0, 1)
+        return 0
+    # Invalid packets do not get analysed at all.
+    else:
+        return 0
+
+    # If we received data, the expected seqnr needs to be counter up.
+    datalength = tcphead.child().get_size()
+    shost.seqnr(datalength)
+    # We only need to take  further action, if we have an ACK packet
+    # without data. Everything else gets enqueued as usual.
+    if flags == 16 and len(str(tcphead.child())) == 0:
+        # We now know we have an ACK for a known connection.
+        # Check the host-state now and take according action. The packet
+        # will not get enqueued since we process it here.
+        if shost.status == Host.STATUS_FIN_WAIT2:
+            shost.status = Host.STATUS_CLOSED
+            con.ack(source, tcphead.get_th_ack())
+            if verbosity:
+                logfile.write("Received last ACK.\n")
+                logfile.write("Seq: "
+                                 + str(tcphead.get_th_seq()) + "\n")
+                logfile.write("Ack: "
+                                 + str(tcphead.get_th_ack()) + "\n")
+                logfile.write("Connection status:\n")
+                logfile.write("Head: " + str(con.head.status) + "\n")
+                logfile.write("Tail: " + str(con.tail.status) + "\n")
+            return 0
+        # Host is active.
+        else:
+            if verbosity:
+                logfile.write("ACK received: \n")
+                logfile.write("Seq: " + str(tcphead.get_th_seq()) + "\n")
+            con.ack(source, tcphead.get_th_ack())
+            if verbosity > 9:
+                logfile.write(str(ethpacket) + "\n")
+            return 0
+    return 1
 
 def getdata(ethhead):
     """Function getting the payload (l7 data) from a ImpactPacket.Ethernet
@@ -502,7 +525,7 @@ def encode(ethhead):
 
 
 def l34protocolfilter(ethpacket):
-    """Funtion returning 1 if packet has TCP content, else 0.
+    """Funtion returning the packets protocol type (see class Protocol).
     """
     ethhead = ethpacket
     iphead = ethhead.child()
@@ -511,8 +534,19 @@ def l34protocolfilter(ethpacket):
         tcpudphead = iphead.child()
         # Only check TCP
         if tcpudphead.protocol == ImpactPacket.TCP.protocol:
-            return 1
-    return 0
+            return Protocol.TCP
+        elif tcpudphead.protocol == ImpactPacket.UDP.protocol:
+            return Protocol.UDP
+    return Protocol.Other
+
+# Structure for protocol types. More to come eventually.
+class Protocol():
+    Other = 0
+    TCP = 1
+    UDP = 2
+
+
+ 
 
 
 def l34filter(ethpacket, reverse=0):
