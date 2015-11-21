@@ -177,64 +177,68 @@ def main(path):
             if filedescriptor == 0 or filedescriptor == 3:
                 ethpacket = decode(readdata)
                 ptype = l34protocolfilter(ethpacket)
-                if filedescriptor == 0:
-                    if ptype == Protocol.TCP:
-                        if l34filter(ethpacket) == 1:
-                            # If we have a match on layer34,
-                            # proceed with layer 4 management
-                            status, con = l4manage(ethpacket,
-                                                   filedescriptor)
-                            if status == 2:
-                                send(Connection.SOCK, con,
-                                     getdata(ethpacket), 0)
-                                # con.sock.send(getdata(ethpacket))
-                            elif status == 1:
-                                send(Connection.TAIL, None,
-                                     readdata, 0)
-                            # Drop packet
-                            else:
-                                pass
+                if (filedescriptor == 0) and (ptype != Protocol.Other):
+                    # Test for filterhits.
+                    if l34filter(ethpacket, ptype):
+                        # If we have a match on layer34,
+                        # proceed with layer 4 management
+                        # TODO: Change mngmt to universal one.
+                        status, con = l4TCPmanage(ethpacket,
+                                               filedescriptor)
+                        # Send l7 data to external controler via socket.
+                        if status == 2:
+                            send(Connection.SOCK, con,
+                                 getdata(ethpacket), 0)
+                            # con.sock.send(getdata(ethpacket))
+                        # # Forward data to target.
+                        # elif status == 1:
+                        #     send(Connection.TAIL, None,
+                        #          readdata, 0)
+                        # Drop packet
                         else:
-                            # Send data to the other end of the wire.
-                            send(Connection.TAIL, None, readdata, 0)
-                    elif ptype == Protocol.UDP:
-                        #TODO implement UDP handling.
-                        #remove placeholder afterwards.
-                        send(Connection.TAIL, None, readdata, 0)
-                    # ptype == Protocol.Other
+                            pass
+                    # No filterhit occured.
                     else:
                         # Send data to the other end of the wire.
                         send(Connection.TAIL, None, readdata, 0)
+                # ptype == Protocol.Other
+                elif (filedescriptor == 0) and (ptype == Protocol.Other):
+                    # Send data to the other end of the wire.
+                    send(Connection.TAIL, None, readdata, 0)
                 # filedescriptor == 3
-                else:
-                    if ptype == Protocol.TCP:
-                        if l34filter(ethpacket, 1):
-                            status, con = l4manage(ethpacket,
-                                                   filedescriptor)
-                            # This is the way back,
-                            # here we do not send to sock but need to
-                            # make sure the correct seq and ack numbers
-                            # are set in the packet we foreward.
-                            if status == 2:
-                                packet = con.makevalid(ethpacket)
-                                packet = encode(packet)
-                                send(Connection.HEAD, con, packet)
-                            elif status == 1:
-                                send(Connection.HEAD, con, packet, 0)
-                            # Drop packet
-                            else:
-                                pass
+                elif (filedescriptor == 3) and (ptype == Protocol.TCP):
+                    # Test for filterhits.
+                    if l34filter(ethpacket, ptype, 1):
+                        # TODO: Change mngmt to universal one.
+                        status, con = l4TCPmanage(ethpacket,
+                                               filedescriptor)
+                        # This is the way back,
+                        # here we do not send to sock but need to
+                        # make sure the correct seq and ack numbers
+                        # are set in the packet we foreward.
+                        if status == 2:
+                            packet = con.makevalid(ethpacket)
+                            packet = encode(packet)
+                            send(Connection.HEAD, con, packet)
+                        # elif status == 1:
+                        #     send(Connection.HEAD, con, packet, 0)
+                        # Drop packet
                         else:
-                            # Send data to the machine at the head
-                            # of the wire.
-                            send(Connection.HEAD, None, readdata, 0)
-                    # ptype == (Protocol.UDP or Protocol.Other)
-                    # UDP normally should not be faulty on the answers.
-                    # TODO: maybe UDP causes problems on the inward direction
+                            pass
+                    # No filterhit occured.
                     else:
                         # Send data to the machine at the head
                         # of the wire.
                         send(Connection.HEAD, None, readdata, 0)
+                # filedescriptor == 3 and 
+                # ptype == (Protocol.UDP or Protocol.Other)
+                # UDP normally should not be faulty on the answers.
+                # TODO: maybe UDP causes problems on the inward direction
+                else:
+                    # Send data to the machine at the head
+                    # of the wire.
+                    send(Connection.HEAD, None, readdata, 0)
+            # Socket data.
             else:
                 if verbosity:
                     logfile.write("Socketdata processed!\n")
@@ -421,13 +425,13 @@ def prefilter(filedescriptor, readdata):
     if ptype == Protocol.TCP:
         return preTCP(ethpacket, filedescriptor)
     elif ptype == Protocol.UDP:
-        return preUDP(ethpacket)
+        return preUDP(ethpacket, filedescriptor)
     # ptype == Protocol.Other
     else:
         return 1
 
-def preUDP(ethpacket):
-    # TODO: Implement preOperations for UDP
+def preUDP(ethpacket, filedescriptor):
+    # no operations needed atm.
     return 1
 
 def preTCP(ethpacket, filedescriptor):
@@ -445,7 +449,7 @@ def preTCP(ethpacket, filedescriptor):
         source = Connection.TAIL
         target = Connection.HEAD
         con = Connection.resolvesrc(tcphead.get_th_dport())
-    # If the connection is unkown yet, enqueue the packet.
+    # If the connection is unkown yet, enqueue the packet and stop pre-mngmt.
     if not con:
         return 1
     # Get the host information.
@@ -549,18 +553,33 @@ class Protocol():
  
 
 
-def l34filter(ethpacket, reverse=0):
-    """Function calculating filterhits on outgoing TCP packets.
+def l34filter(ethpacket, ptype, reverse=0):
+    """Function calculating filterhits on outgoing packets.
     (Layer 7 mode)."""
     ethhead = ethpacket
     iphead = ethhead.child()
     tcpudphead = iphead.child()
     if not reverse:
         packetip = iphead.get_ip_dst()
-        port = str(tcpudphead.get_th_dport())
+        if ptype == Protocol.TCP:
+            port = str(tcpudphead.get_th_dport())
+        elif ptype == Protocol.UDP:
+            port = str(tcpudphead.get_uh_dport())
+        # ptype == Protocol.Other
+        else:
+            raise ValueError("l34filter should never" +
+                              " get passed non-TCP/UDP data.")
     else:
         packetip = iphead.get_ip_src()
-        port = str(tcpudphead.get_th_sport())
+        if ptype == Protocol.TCP:
+            port = str(tcpudphead.get_th_sport())
+        elif ptype == Protocol.UDP:
+            port = str(tcpudphead.get_uh_sport())
+        # ptype == Protocol.Other
+        else:
+            raise ValueError("l34filter should never" +
+                              " get passed non-TCP/UDP data.")
+        
     if not packetip in ipfilter:
         if verbosity > 9:
             logfile.write("No IP match. \n")
@@ -599,7 +618,7 @@ def getconinfo(packet):
     return ((sourcemac, sourceip, sourceport), (dstmac, dstip, dstport), seq)
 
 
-def l4manage(ethhead, filedescriptor):
+def l4TCPmanage(ethhead, filedescriptor):
     """Function checking the TCP information in a packet, retrieving the
     corresponding tcp connection and taking care of tcp commands.
     filedescriptor is needed to determine the direction of the data.
