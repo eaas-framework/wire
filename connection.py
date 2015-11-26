@@ -54,6 +54,9 @@ class Connection(object):
     fdtocon = dict()
     sockinfo = tuple()
     poller = None
+    TAIL = "tail"
+    HEAD = "head"
+    SOCK = "sock"
 
     def __init__(self, source, dest):
         self.head = source
@@ -106,7 +109,7 @@ class Connection(object):
         """
         ethhead = ImpactPacket.Ethernet()
         iphead = ImpactPacket.IP()
-        if target == TCPConnection.HEAD:
+        if target == Connection.HEAD:
             # Set MACs:
             ethhead.set_ether_shost(self.tail.mac)
             ethhead.set_ether_dhost(self.head.mac)
@@ -139,6 +142,7 @@ class UDPConnection(Connection):
         """Packet is the packet, where the connection should be built from."""
         source, dest, seq = getconinfo(packet)
         self.sock = Connection.newSocket()
+        self.type = Protocol.UDP
         super(UDPConnection, self).__init__(UDPHost(source), UDPHost(dest))
         UDPConnection.connectionlist[source[2]] = self
         Connection.fdtocon[self.sock.fileno()] = self
@@ -152,10 +156,6 @@ class TCPConnection(Connection):
     afterwards sent to alt_stdout. The other way round it works the same.
     """
     connectionlist = dict()
-    
-    TAIL = "tail"
-    HEAD = "head"
-    SOCK = "sock"
     stdout = None
     alt_stdout = None
 
@@ -170,6 +170,7 @@ class TCPConnection(Connection):
             dest, source, seqtail = getconinfo(packet)
             seqhead = 0
         self.sock = Connection.newSocket()
+        self.type = Protocol.TCP
         #sock.fileno()
         super(TCPConnection, self).__init__(TCPHost(source, seqhead, seqtail), 
                                             TCPHost(dest, seqtail, seqhead))
@@ -186,7 +187,7 @@ class TCPConnection(Connection):
         """Method adding the given packet to the retransmission queue of target.
         The ACKnr which will delete the entry is the one which is valid at
         calltime of the method."""
-        if target == TCPConnection.HEAD:
+        if target == Connection.HEAD:
             s.lock.acquire()
             self.head.retransqueue[acknr] = (time(), packet)
             if s.verbosity:
@@ -217,7 +218,7 @@ class TCPConnection(Connection):
         """Function returning a TCP-RST packet to target.
         """
         tcp = ImpactPacket.TCP()
-        if target == TCPConnection.HEAD:
+        if target == Connection.HEAD:
             thost = self.head
             shost = self.tail
         # target == TCPConnection.TAIL
@@ -241,7 +242,7 @@ class TCPConnection(Connection):
         This will remove it from the retransmission queue.
         """
         # Sinc w
-        if source == TCPConnection.HEAD:
+        if source == Connection.HEAD:
             host = self.head
         else:
             host = self.tail
@@ -269,7 +270,7 @@ class TCPConnection(Connection):
     def syn(self, source, seq, winsize):
         """Method managing received SYN by setting the seqnr for the connection
         """
-        if source == TCPConnection.HEAD:
+        if source == Connection.HEAD:
             self.head.seq = seq + 1
             self.head.expectACK = seq + 1
             self.tail.expectSEQ = seq + 1
@@ -290,14 +291,14 @@ class TCPConnection(Connection):
     def fin(self, source, datalen=0):
         """Method managing received FIN by closing the connection in one
         direction."""
-        if source == TCPConnection.HEAD:
+        if source == Connection.HEAD:
             shost = self.head
             thost = self.tail
             target = TCPConnection.TAIL
         else:
             shost = self.tail
             thost = self.head
-            target = TCPConnection.HEAD
+            target = Connection.HEAD
         # If the sender had status open so far, he was the initiator of FIN.
         if shost.status == TCPHost.STATUS_OPEN:
             self.sendfin(source, 1, datalen)
@@ -332,7 +333,7 @@ class TCPConnection(Connection):
         be the answer to a received FIN/ACK. Else this is the initiation of
         the connection closing mechanism."""
         tcp = ImpactPacket.TCP()
-        if target == TCPConnection.HEAD:
+        if target == Connection.HEAD:
             thost = self.head
             shost = self.tail
             out = TCPConnection.stdout
@@ -368,7 +369,7 @@ class TCPConnection(Connection):
         """Function sending an acknowledgement to target. bytes is the number
         of bytes which get acknowledged."""
         tcp = ImpactPacket.TCP()
-        if target == TCPConnection.HEAD:
+        if target == Connection.HEAD:
             thost = self.head
             shost = self.tail
             out = TCPConnection.stdout
@@ -406,7 +407,7 @@ class TCPConnection(Connection):
         if target == TCPConnection.TAIL:
             out = TCPConnection.alt_stdout
             host = self.head
-        # target == TCPConnection.HEAD
+        # target == Connection.HEAD
         else:
             out = TCPConnection.stdout
             host = self.tail
@@ -434,7 +435,7 @@ class TCPConnection(Connection):
         """Method validating received packet. If seqnr is the right (expexted)
         one return 0, if seqnr is the expexted seqnr - 1 return 1 (keepalive)
         else return 2, packet will get dropped since its invalid."""
-        if source == TCPConnection.HEAD:
+        if source == Connection.HEAD:
             host = self.head
         else:
             host = self.tail
@@ -455,13 +456,13 @@ class TCPConnection(Connection):
                              + " Got: " + str(seqnr) + "\n")
             return 2
 
-    def makevalid(self, ethhead, target=HEAD):
+    def makevalid(self, ethhead, target=Connection.HEAD):
         """Method making a packet to 'target' a valid TCP packet next in row.
         """
         iphead = ethhead.child()
         tcphead = iphead.child()
         data = tcphead.child()
-        if target == TCPConnection.HEAD:
+        if target == Connection.HEAD:
             # Set MACs:
             ethhead.set_ether_shost(self.tail.mac)
             ethhead.set_ether_dhost(self.head.mac)

@@ -69,7 +69,7 @@ def send(target, con, packet, enqueue=1):
     """Puts packets in the sendingQueue in a proper format."""
     global sendingQueue
     if enqueue:
-        if target == connection.TCPConnection.HEAD:
+        if target == connection.Connection.HEAD:
             acknr = con.head.acknr()
         else:
             acknr = con.tail.acknr()
@@ -81,28 +81,4 @@ def time():
     """Return the actual time."""
     return datetime.datetime.now()
 
-def getconinfo(packet):
-    """Function parsing data for opening a new connection. Return values are
-    source = (mac, ip, port), dest = (mac, ip, port), seq = sequence number 
-    (if any)"""
-    ethhead = packet
-    iphead = ethhead.child()
-    tcpudphead = iphead.child()
-    sourceip = iphead.get_ip_src()
-    dstip = iphead.get_ip_dst()
-    sourcemac = ethhead.get_ether_shost()
-    dstmac = ethhead.get_ether_dhost()
-    ptype = l34protocolfilter(ethhead)
-    if ptype == Protocol.TCP:
-        dstport = tcpudphead.get_th_dport()
-        sourceport = tcpudphead.get_th_sport()
-        seq = tcpudphead.get_th_seq()
-    elif ptype == Protocol.UDP:
-        dstport = tcpudphead.get_uh_dport
-        sourceport = tcpudphead.get_uh_sport()
-        seq = None
-    # ptype == Protocol.Other
-    else:
-        raise ValueError("No non-TCP/UDP packets should be passed to this fct.")
 
-    return ((sourcemac, sourceip, sourceport), (dstmac, dstip, dstport), seq)

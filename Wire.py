@@ -99,12 +99,12 @@ def main(path):
                                                filedescriptor, ptype)
                         # Send l7 data to external controler via socket.
                         if status == 2:
-                            send(TCPConnection.SOCK, con,
+                            send(Connection.SOCK, con,
                                  getdata(ethpacket), 0)
                             # con.sock.send(getdata(ethpacket))
                         # # Forward data to target.
                         # elif status == 1:
-                        #     send(TCPConnection.TAIL, None,
+                        #     send(Connection.TAIL, None,
                         #          readdata, 0)
                         # Drop packet
                         else:
@@ -112,11 +112,11 @@ def main(path):
                     # No filterhit occured.
                     else:
                         # Send data to the other end of the wire.
-                        send(TCPConnection.TAIL, None, readdata, 0)
+                        send(Connection.TAIL, None, readdata, 0)
                 # ptype == Protocol.Other
                 elif (filedescriptor == 0) and (ptype == Protocol.Other):
                     # Send data to the other end of the wire.
-                    send(TCPConnection.TAIL, None, readdata, 0)
+                    send(Connection.TAIL, None, readdata, 0)
                 # filedescriptor == 3
                 elif (filedescriptor == 3) and (ptype == Protocol.TCP):
                     # Test for filterhits.
@@ -132,9 +132,9 @@ def main(path):
                         if status == 2:
                             packet = con.makevalid(ethpacket)
                             packet = encode(packet)
-                            send(TCPConnection.HEAD, con, packet)
+                            send(Connection.HEAD, con, packet)
                         # elif status == 1:
-                        #     send(TCPConnection.HEAD, con, packet, 0)
+                        #     send(Connection.HEAD, con, packet, 0)
                         # Drop packet
                         else:
                             pass
@@ -142,7 +142,7 @@ def main(path):
                     else:
                         # Send data to the machine at the head
                         # of the wire.
-                        send(TCPConnection.HEAD, None, readdata, 0)
+                        send(Connection.HEAD, None, readdata, 0)
                 # filedescriptor == 3 and 
                 # ptype == (Protocol.UDP or Protocol.Other)
                 # UDP normally should not be faulty on the answers.
@@ -150,7 +150,7 @@ def main(path):
                 else:
                     # Send data to the machine at the head
                     # of the wire.
-                    send(TCPConnection.HEAD, None, readdata, 0)
+                    send(Connection.HEAD, None, readdata, 0)
             # Socket data.
             else:
                 if s.verbosity:
@@ -174,10 +174,183 @@ def l4manage(ethpacket, filedescriptor, ptype):
         raise ValueError("Other protocols should get filtered out before.")
 
 
-def l4UDPmanage(ethpacket, filedescriptor):
+def l4UDPmanage(ethhead, filedescriptor):
     """Function managing UDP packets, by resolving the corresponding socket
     connection."""
+    iphead = ethhead.child()
+    udphead = iphead.child()
+    if not filedescriptor == 0:
+        raise ValueError("Inward direction not yet implemented.")
+    else:
+        con = Connection.resolvesrc(udphead.get_uh_sport(), Protocol.UDP)
+        if not con:
+            if s.verbosity:
+                s.logfile.write("New UDPConnection! SPort: " +
+                                 str(udphead.get_uh_sport()) + "\n")
+            con = UDPConnection(ethhead)
+        return 2, con
 
+
+
+def l4TCPmanage(ethhead, filedescriptor):
+    """Function checking the TCP information in a packet, retrieving the
+    corresponding tcp connection and taking care of tcp commands.
+    filedescriptor is needed to determine the direction of the data.
+    Return values: 0-> Drop packet. 1-> Send data to stdout/alt_stdout,
+    2-> Send data to sockpreet. Second value is a decoded ethheader with all
+    layers as children. Third value is the connection for the packet.
+    """
+    if s.verbosity:
+        s.logfile.write("\n")
+    iphead = ethhead.child()
+    # Unpack to layer 7. WARNING: If there are more or less than 3 layers
+    # above the data this will crash!
+    tcphead = iphead.child()
+    flags = tcphead.get_th_flags()
+    if filedescriptor == 0:
+        reverse = 0
+        source = Connection.HEAD
+        target = Connection.TAIL
+        # Get the corresponding connection, if there exists none yet, create it
+        con = Connection.resolvesrc(tcphead.get_th_sport(), Protocol.TCP)
+        # Check for seq- consistency
+        # if (tcphead.get_th_seq != )
+    # filedescriptor == 3
+    else:
+        reverse = 1
+        source = Connection.TAIL
+        target = Connection.HEAD
+        con = Connection.resolvesrc(tcphead.get_th_dport(), Protocol.TCP)
+    if not con:
+        if s.verbosity:
+            s.logfile.write("New TCPConnection! SPort: " +
+                             str(tcphead.get_th_sport()) + "\n")
+            s.logfile.write("Flags: " + str(tcphead.get_th_flags()) + "\n")
+        con = TCPConnection(ethhead, reverse)
+        # Check if we have a sane connection creation. If this is the first
+        # packet of the connection it MUST be a SYN packet.
+        if not tcphead.get_SYN():
+            # Send RST command.
+            send(source, None, vdepad(cksum(con.reset(source))), 0)
+            s.logfile.write("Bad connection, removing!\n")
+            s.deletionList.append(con)
+            return 0, con
+        # If it is a SYN, give connection the information and forward to fd.
+        con.syn(source, tcphead.get_th_seq(), tcphead.get_th_win())
+        con.sendSYN(target, ethhead)
+        if s.verbosity > 9:
+            s.logfile.write(str(ethhead) + "\n")
+        # Acknowledge the packet.
+        # con.sendack(source, 1)
+        return 0, con
+
+    # Now where we have a connection, get the host information.
+    if source == Connection.HEAD:
+        shost = con.head
+    else:
+        shost = con.tail
+
+    # If SYN and ACK are set, we are at step 2 of the 3 way handshake.
+    # Give connection the information and forward to fd.
+    if tcphead.get_SYN() and tcphead.get_ACK():
+        if s.verbosity:
+            s.logfile.write("SYNACK found! \n")
+            s.logfile.write("Seq: " + str(tcphead.get_th_seq()) + "\n")
+            s.logfile.write("Ack: " + str(tcphead.get_th_ack()) + "\n")
+        con.syn(source, tcphead.get_th_seq(), tcphead.get_th_win())
+        con.ack(source, tcphead.get_th_ack())
+        # Acknowledge the packet.
+        con.sendack(source, 0)
+        con.sendSYN(target, ethhead)
+        if s.verbosity > 9:
+            s.logfile.write(str(ethhead) + "\n")
+        # Ignore if data is sent with the packet.
+        return 0, con
+
+    # Check for commands and take the according action.
+    # If there is data sent with the packet, forward it to the socket.
+    # TODO: __str__ of headers is very expensive.
+    datalen = len(str(tcphead.child()))
+    if datalen > 0:
+        data = tcphead.child()
+    else:
+        data = None
+
+    # If FIN and ACK are set, tell the connection to init the finish procedure.
+    if tcphead.get_FIN() and tcphead.get_ACK():
+        if not data:
+            if s.verbosity:
+                s.logfile.write("FIN/ACK received!\n")
+                s.logfile.write("Seq: " + str(tcphead.get_th_seq()) + "\n")
+                s.logfile.write("Ack: " + str(tcphead.get_th_ack()) + "\n")
+            con.ack(source, tcphead.get_th_ack())
+            con.fin(source)
+        # If data exists in the FIN/ACK package, process it before closing.
+        elif data and target == Connection.HEAD:
+            tcphead.reset_FIN()
+            new_packet = con.makevalid(ethhead)
+            new_packet = cksum(new_packet)
+            new_packet = encode(new_packet)
+            send(target, con, new_packet)
+            con.fin(source, datalen)
+        elif data and target == Connection.TAIL:
+            send(Connection.SOCK, con, getdata(ethhead), 0)
+            con.fin(source, datalen)
+        else:
+            raise ValueError("Faulty FIN procedure.")
+        return 0, con
+
+    # If we get a RST/ACK or RST packet,
+    # drop the connection and tell the other end.
+    elif flags == 20 or flags == 4:
+        if s.verbosity:
+            s.logfile.write("RST Flag set!")
+            s.logfile.write("Seq: " + str(tcphead.get_th_seq()) + "\n")
+            if flags == 20:
+                s.logfile.write("Ack: " + str(tcphead.get_th_ack()) + "\n")
+        # Send RST command.
+        send(target, None, vdepad(cksum(con.reset(target))), 0)
+        # Remove connection.
+        # TCPConnection.remove(con)
+        return 0, con
+
+    # If ACK flag is set from an active host, give the connection
+    # the information.
+    elif flags == 16 or flags == 24:
+        if s.verbosity:
+            s.logfile.write("ACK received: \n")
+            s.logfile.write("Seq: " + str(tcphead.get_th_seq()) + "\n")
+        con.ack(source, tcphead.get_th_ack())
+        if s.verbosity > 9:
+            s.logfile.write(str(ethhead) + "\n")
+        # ACKs without data will not get acknowledged!
+        if not data:
+            return 0, con
+    # Check for FIN flag, if set, tell the connection.
+    elif tcphead.get_FIN():
+        con.fin(source)
+        if s.verbosity:
+            s.logfile.write("TCPConnection closed with FIN. SPort: "
+                             + str(con.source[2]) + "\n")
+    if data:
+        if s.verbosity:
+            s.logfile.write("Data packet received! \n")
+            s.logfile.write("SeqNr: " + str(tcphead.get_th_seq()) + "\n")
+            s.logfile.write("AckNr: " + str(tcphead.get_th_ack()) + "\n")
+            if s.verbosity > 9:
+                s.logfile.write("Packet is:\n"
+                                 + vdepad(cksum(ethhead)) + "\n")
+        # If data is given, we always need to send an ACK.
+        # TODO: get_packet is very expensive
+        con.sendack(source, len(data.get_packet()))
+        return 2, con
+    # If there is no data, do not forward to socket.
+    # Acknowledge the control data.
+    if s.verbosity:
+        s.logfile.write("Other control received. \n")
+        s.logfile.write("Flags:" + str(tcphead.get_th_flags()) + '\n')
+    con.sendack(source, 1)
+    return 0, con
 
 
 def tcpretransmit():
@@ -194,7 +367,7 @@ def tcpretransmit():
                 if s.verbosity or not s.verbosity:
                     s.logfile.write("Head: Retransmission of ACKNr: "
                                      + str(hq.smallest()) + "\n")
-                send(TCPConnection.HEAD, con, hq[hq.smallest()][1], 0)
+                send(Connection.HEAD, con, hq[hq.smallest()][1], 0)
                 hq.pop_smallest()
                 if not hq:
                     break
@@ -204,7 +377,7 @@ def tcpretransmit():
                 if s.verbosity or not s.verbosity:
                     s.logfile.write("Tail: Retransmission of ACKNr: "
                                      + str(tq.smallest()) + "\n")
-                send(TCPConnection.TAIL, con, tq[tq.smallest()][1], 0)
+                send(Connection.TAIL, con, tq[tq.smallest()][1], 0)
                 tq.pop_smallest()
                 if not tq:
                     break
@@ -286,8 +459,8 @@ def sendingRoutine():
             target = "sock"
         else:
             target, con, packet, enqueue, acknr = s.sendingQueue.get()
-        if target == TCPConnection.HEAD or target == TCPConnection.TAIL:
-            if target == TCPConnection.HEAD:
+        if target == Connection.HEAD or target == Connection.TAIL:
+            if target == Connection.HEAD:
                 out = TCPConnection.stdout
             else:
                 out = TCPConnection.alt_stdout
@@ -318,7 +491,7 @@ def scheduledEvents():
                 s.logfile.write("Sending FIN: "
                                  + str(con.source) + "\n")
             con.sendfin(target, 0)
-            if target == TCPConnection.HEAD:
+            if target == Connection.HEAD:
                 con.head.status = TCPHost.STATUS_CLOSE_WAIT
             else:
                 con.tail.status = TCPHost.STATUS_CLOSE_WAIT
@@ -353,20 +526,20 @@ def preTCP(ethpacket, filedescriptor):
     flags = tcphead.get_th_flags()
     if filedescriptor == 0:
         reverse = 0
-        source = TCPConnection.HEAD
-        target = TCPConnection.TAIL
+        source = Connection.HEAD
+        target = Connection.TAIL
         con = Connection.resolvesrc(tcphead.get_th_sport(), Protocol.TCP)
     # filedescriptor == 3
     else:
         reverse = 1
-        source = TCPConnection.TAIL
-        target = TCPConnection.HEAD
+        source = Connection.TAIL
+        target = Connection.HEAD
         con = Connection.resolvesrc(tcphead.get_th_dport(), Protocol.TCP)
     # If the connection is unkown yet, enqueue the packet and stop pre-mngmt.
     if not con:
         return 1
     # Get the host information.
-    if source == TCPConnection.HEAD:
+    if source == Connection.HEAD:
         shost = con.head
     else:
         shost = con.tail
@@ -471,173 +644,12 @@ def l34filter(ethpacket, ptype, reverse=0):
             return 0
 
 
-
-def l4TCPmanage(ethhead, filedescriptor):
-    """Function checking the TCP information in a packet, retrieving the
-    corresponding tcp connection and taking care of tcp commands.
-    filedescriptor is needed to determine the direction of the data.
-    Return values: 0-> Drop packet. 1-> Send data to stdout/alt_stdout,
-    2-> Send data to sockpreet. Second value is a decoded ethheader with all
-    layers as children. Third value is the connection for the packet.
-    """
-    if s.verbosity:
-        s.logfile.write("\n")
-    iphead = ethhead.child()
-    # Unpack to layer 7. WARNING: If there are more or less than 3 layers
-    # above the data this will crash!
-    tcphead = iphead.child()
-    flags = tcphead.get_th_flags()
-    if filedescriptor == 0:
-        reverse = 0
-        source = TCPConnection.HEAD
-        target = TCPConnection.TAIL
-        # Get the corresponding connection, if there exists none yet, create it
-        con = Connection.resolvesrc(tcphead.get_th_sport(), Protocol.TCP)
-        # Check for seq- consistency
-        # if (tcphead.get_th_seq != )
-    # filedescriptor == 3
-    else:
-        reverse = 1
-        source = TCPConnection.TAIL
-        target = TCPConnection.HEAD
-        con = Connection.resolvesrc(tcphead.get_th_dport(), Protocol.TCP)
-    if not con:
-        if s.verbosity:
-            s.logfile.write("New TCPConnection! SPort: " +
-                             str(tcphead.get_th_sport()) + "\n")
-            s.logfile.write("Flags: " + str(tcphead.get_th_flags()) + "\n")
-        con = TCPConnection(ethhead, reverse)
-        # Check if we have a sane connection creation. If this is the first
-        # packet of the connection it MUST be a SYN packet.
-        if not tcphead.get_SYN():
-            # Send RST command.
-            send(source, None, vdepad(cksum(con.reset(source))), 0)
-            s.logfile.write("Bad connection, removing!\n")
-            s.deletionList.append(con)
-            return 0, con
-        # If it is a SYN, give connection the information and forward to fd.
-        con.syn(source, tcphead.get_th_seq(), tcphead.get_th_win())
-        con.sendSYN(target, ethhead)
-        if s.verbosity > 9:
-            s.logfile.write(str(ethhead) + "\n")
-        # Acknowledge the packet.
-        # con.sendack(source, 1)
-        return 0, con
-
-    # Now where we have a connection, get the host information.
-    if source == TCPConnection.HEAD:
-        shost = con.head
-    else:
-        shost = con.tail
-
-    # If SYN and ACK are set, we are at step 2 of the 3 way handshake.
-    # Give connection the information and forward to fd.
-    if tcphead.get_SYN() and tcphead.get_ACK():
-        if s.verbosity:
-            s.logfile.write("SYNACK found! \n")
-            s.logfile.write("Seq: " + str(tcphead.get_th_seq()) + "\n")
-            s.logfile.write("Ack: " + str(tcphead.get_th_ack()) + "\n")
-        con.syn(source, tcphead.get_th_seq(), tcphead.get_th_win())
-        con.ack(source, tcphead.get_th_ack())
-        # Acknowledge the packet.
-        con.sendack(source, 0)
-        con.sendSYN(target, ethhead)
-        if s.verbosity > 9:
-            s.logfile.write(str(ethhead) + "\n")
-        # Ignore if data is sent with the packet.
-        return 0, con
-
-    # Check for commands and take the according action.
-    # If there is data sent with the packet, forward it to the socket.
-    # TODO: __str__ of headers is very expensive.
-    datalen = len(str(tcphead.child()))
-    if datalen > 0:
-        data = tcphead.child()
-    else:
-        data = None
-
-    # If FIN and ACK are set, tell the connection to init the finish procedure.
-    if tcphead.get_FIN() and tcphead.get_ACK():
-        if not data:
-            if s.verbosity:
-                s.logfile.write("FIN/ACK received!\n")
-                s.logfile.write("Seq: " + str(tcphead.get_th_seq()) + "\n")
-                s.logfile.write("Ack: " + str(tcphead.get_th_ack()) + "\n")
-            con.ack(source, tcphead.get_th_ack())
-            con.fin(source)
-        # If data exists in the FIN/ACK package, process it before closing.
-        elif data and target == TCPConnection.HEAD:
-            tcphead.reset_FIN()
-            new_packet = con.makevalid(ethhead)
-            new_packet = cksum(new_packet)
-            new_packet = encode(new_packet)
-            send(target, con, new_packet)
-            con.fin(source, datalen)
-        elif data and target == TCPConnection.TAIL:
-            send(TCPConnection.SOCK, con, getdata(ethhead), 0)
-            con.fin(source, datalen)
-        else:
-            raise ValueError("Faulty FIN procedure.")
-        return 0, con
-
-    # If we get a RST/ACK or RST packet,
-    # drop the connection and tell the other end.
-    elif flags == 20 or flags == 4:
-        if s.verbosity:
-            s.logfile.write("RST Flag set!")
-            s.logfile.write("Seq: " + str(tcphead.get_th_seq()) + "\n")
-            if flags == 20:
-                s.logfile.write("Ack: " + str(tcphead.get_th_ack()) + "\n")
-        # Send RST command.
-        send(target, None, vdepad(cksum(con.reset(target))), 0)
-        # Remove connection.
-        # TCPConnection.remove(con)
-        return 0, con
-
-    # If ACK flag is set from an active host, give the connection
-    # the information.
-    elif flags == 16 or flags == 24:
-        if s.verbosity:
-            s.logfile.write("ACK received: \n")
-            s.logfile.write("Seq: " + str(tcphead.get_th_seq()) + "\n")
-        con.ack(source, tcphead.get_th_ack())
-        if s.verbosity > 9:
-            s.logfile.write(str(ethhead) + "\n")
-        # ACKs without data will not get acknowledged!
-        if not data:
-            return 0, con
-    # Check for FIN flag, if set, tell the connection.
-    elif tcphead.get_FIN():
-        con.fin(source)
-        if s.verbosity:
-            s.logfile.write("TCPConnection closed with FIN. SPort: "
-                             + str(con.source[2]) + "\n")
-    if data:
-        if s.verbosity:
-            s.logfile.write("Data packet received! \n")
-            s.logfile.write("SeqNr: " + str(tcphead.get_th_seq()) + "\n")
-            s.logfile.write("AckNr: " + str(tcphead.get_th_ack()) + "\n")
-            if s.verbosity > 9:
-                s.logfile.write("Packet is:\n"
-                                 + vdepad(cksum(ethhead)) + "\n")
-        # If data is given, we always need to send an ACK.
-        # TODO: get_packet is very expensive
-        con.sendack(source, len(data.get_packet()))
-        return 2, con
-    # If there is no data, do not forward to socket.
-    # Acknowledge the control data.
-    if s.verbosity:
-        s.logfile.write("Other control received. \n")
-        s.logfile.write("Flags:" + str(tcphead.get_th_flags()) + '\n')
-    con.sendack(source, 1)
-    return 0, con
-
-
 def l7manage(data, con):
     """Function repacking the payload data received from the socket and sending
     it to the TAIL of the connection.
     con is the connection for which we are repacking the data.
     """
+    #TODO:  Implement UDP split.
     datalength = len(str(data))
     loglength = datalength
     # If the datalength is not bigger than the given MSS
@@ -648,7 +660,7 @@ def l7manage(data, con):
         packet = datapacket(con, data)
         if s.verbosity == 3:
             s.logfile.write("Resulting packet:\n" + str(packet) + "\n")
-        send(TCPConnection.TAIL, con, packet)
+        send(Connection.TAIL, con, packet)
     # The datalength is bigger than the MSS, we need to send multiple packets.
     else:
         if s.verbosity or not s.verbosity:
@@ -662,7 +674,7 @@ def l7manage(data, con):
             data = data[con.head.mss:]
             if s.verbosity > 9:
                 s.logfile.write("Resulting packet:\n" + str(packet) + "\n")
-            send(TCPConnection.TAIL, con, packet)
+            send(Connection.TAIL, con, packet)
             datalength -= con.head.mss
         if s.verbosity:
             s.logfile.write("Writing last part: " + str(datalength)
@@ -671,7 +683,7 @@ def l7manage(data, con):
         packet = datapacket(con, data)
         if s.verbosity > 9:
             s.logfile.write("Resulting packet:\n" + str(packet) + "\n")
-        send(TCPConnection.TAIL, con, packet)
+        send(Connection.TAIL, con, packet)
 
 
 def datapacket(con, data):
@@ -691,7 +703,7 @@ def datapacket(con, data):
     tcp.set_ACK()
     tcp.contains(data)
     con.tail.acknr(datalength)
-    ethhead = con.packet(TCPConnection.TAIL, tcp)
+    ethhead = con.packet(Connection.TAIL, tcp)
     packet = vdepad(cksum(ethhead))
     return packet
 
