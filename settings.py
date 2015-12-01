@@ -111,11 +111,11 @@ def init(path):
     # was received.
     global finTime
     finTime = datetime.timedelta(seconds=2)
-
-    
-
-
-
+    # Maximum UDP data size for one packet.
+    # 512 Bytes is the guaranteed supported size on the WWW. 
+    # If you know more about the environment, feel free to change this value.
+    global udpsize
+    udpsize = 512
    
 
     # This is the retranmissionQueue lock.

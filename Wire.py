@@ -471,6 +471,8 @@ def sendingRoutine():
         # Socket
         else:
             try:
+                s.logfile.write("Writing " + str(len(packet)) +
+                                " Bytes to socket. \n")
                 con.sock.send(packet)
             except socket.error:
                 s.reSendingQueue.put(packet)
@@ -649,7 +651,56 @@ def l7manage(data, con):
     it to the TAIL of the connection.
     con is the connection for which we are repacking the data.
     """
-    #TODO:  Implement UDP split.
+    if s.verbosity > 9:
+        s.logfile.write(str(len(data)) + " Bytes from socket. \n")
+    if con.type == Protocol.TCP:
+        l7TCPmanage(data, con)        
+    elif con.type == Protocol.UDP:
+        l7UDPmanage(data, con)
+    #con.type == Protocol.Other
+    else:
+        raise ValueError("No socket possible for Protocol.Other.")
+
+def l7UDPmanage(data, con):
+    """Managing the UDP part of l7manage."""
+    datalength = len(str(data))
+    loglength = datalength
+    # If the datalenth does not exceed the max UDP length.
+    if not datalength > s.udpsize:
+        if s.verbosity:
+            s.logfile.write("Writing " + str(datalength)
+                             + " Bytes to TAIL.\n")
+        packet = udppacket(con, data)
+        if s.verbosity == 3:
+            s.logfile.write("Resulting packet:\n" + str(packet) + "\n")
+        send(Connection.TAIL, con, packet, 0)
+    # Too much data for one packet, splitting required.
+    else:
+        if s.verbosity or not s.verbosity:
+            s.logfile.write("Multiple packets will be sent. Datalength is: "
+                             + str(datalength) + " Bytes to TAIL.\n")
+        while datalength > s.udpsize:
+            if s.verbosity:
+                s.logfile.write("Writing a part: " + str(s.udpsize)
+                                 + " Bytes to TAIL.\n")
+            packet = udppacket(con, data[:s.udpsize])
+            data = data[s.udpsize:]
+            if s.verbosity > 9:
+                s.logfile.write("Resulting packet:\n" + str(packet) + "\n")
+            send(Connection.TAIL, con, packet, 0)
+            datalength -= s.udpsize
+        if s.verbosity:
+            s.logfile.write("Writing last part: " + str(datalength)
+                             + " Bytes to TAIL.\n")
+            s.logfile.write(str(loglength) + " Bytes written in total.\n")
+        packet = udppacket(con, data)
+        if s.verbosity > 9:
+            s.logfile.write("Resulting packet:\n" + str(packet) + "\n")
+        send(Connection.TAIL, con, packet, 0)
+
+
+def l7TCPmanage(data, con):
+    """Managing the TCP part of l7manage."""
     datalength = len(str(data))
     loglength = datalength
     # If the datalength is not bigger than the given MSS
@@ -657,7 +708,7 @@ def l7manage(data, con):
         if s.verbosity:
             s.logfile.write("Writing " + str(datalength)
                              + " Bytes to TAIL.\n")
-        packet = datapacket(con, data)
+        packet = tcppacket(con, data)
         if s.verbosity == 3:
             s.logfile.write("Resulting packet:\n" + str(packet) + "\n")
         send(Connection.TAIL, con, packet)
@@ -670,7 +721,7 @@ def l7manage(data, con):
             if s.verbosity:
                 s.logfile.write("Writing a part: " + str(con.head.mss)
                                  + " Bytes to TAIL.\n")
-            packet = datapacket(con, data[:con.head.mss])
+            packet = tcppacket(con, data[:con.head.mss])
             data = data[con.head.mss:]
             if s.verbosity > 9:
                 s.logfile.write("Resulting packet:\n" + str(packet) + "\n")
@@ -680,14 +731,13 @@ def l7manage(data, con):
             s.logfile.write("Writing last part: " + str(datalength)
                              + " Bytes to TAIL.\n")
             s.logfile.write(str(loglength) + " Bytes written in total.\n")
-        packet = datapacket(con, data)
+        packet = tcppacket(con, data)
         if s.verbosity > 9:
             s.logfile.write("Resulting packet:\n" + str(packet) + "\n")
         send(Connection.TAIL, con, packet)
 
-
-def datapacket(con, data):
-    """Function returning a datapacket for the given connection with data as
+def tcppacket(con, data):
+    """Function returning a tcppacket for the given connection with data as
     payload with target con.tail."""
     datalength = len(str(data))
     data = ImpactPacket.Data(data)
@@ -704,6 +754,19 @@ def datapacket(con, data):
     tcp.contains(data)
     con.tail.acknr(datalength)
     ethhead = con.packet(Connection.TAIL, tcp)
+    packet = vdepad(cksum(ethhead))
+    return packet
+
+
+def udppacket(con, data):
+    """Function returning a udppacket for the given connection with data as
+    payload with target con.tail."""
+    data = ImpactPacket.Data(data)
+    udp = ImpactPacket.UDP()
+    udp.set_uh_dport(con.tail.port)
+    udp.set_uh_sport(con.head.port)
+    udp.contains(data)
+    ethhead = con.packet(Connection.TAIL, udp)
     packet = vdepad(cksum(ethhead))
     return packet
 

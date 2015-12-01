@@ -39,7 +39,7 @@ def getconinfo(packet):
         sourceport = tcpudphead.get_th_sport()
         seq = tcpudphead.get_th_seq()
     elif ptype == Protocol.UDP:
-        dstport = tcpudphead.get_uh_dport
+        dstport = tcpudphead.get_uh_dport()
         sourceport = tcpudphead.get_uh_sport()
         seq = None
     # ptype == Protocol.Other
@@ -104,7 +104,7 @@ class Connection(object):
         s.deletionList.remove(con)
         TCPConnection.connectionlist.pop(con.source[2])
 
-    def packet(self, target, tcppacket):
+    def packet(self, target, packet):
         """Function forging a packet for connection con. Only L1-3 get created.
         """
         ethhead = ImpactPacket.Ethernet()
@@ -125,7 +125,7 @@ class Connection(object):
             iphead.set_ip_dst(self.tail.ipaddr)
             iphead.set_ip_src(self.head.ipaddr)
 
-        iphead.contains(tcppacket)
+        iphead.contains(packet)
         ethhead.contains(iphead)
         return ethhead
 

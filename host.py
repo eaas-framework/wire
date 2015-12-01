@@ -23,7 +23,7 @@ class Host(object):
     def __init__(self, information):
         self.mac = information[0]
         self.ipaddr = information[1]
-        self.port = information[2]
+        self.port = int(information[2])
 
 
 class UDPHost(Host):
