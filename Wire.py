@@ -811,7 +811,7 @@ def tcpipfilter_out(packet):
         else:
             # If no port rules apply, all ip hits are filtered.
             if not s.portfilter[dstip]:
-                content.set_ip_dst(newTargetIp)
+                content.set_ip_dst(s.newTargetIp)
                 if streamtype == 0:
                     child.set_th_sum(0)
                     child.auto_checksum = 1
@@ -825,7 +825,7 @@ def tcpipfilter_out(packet):
             # Test for Port-dest hits on TCP.
             elif streamtype == 0:
                 if str(child.get_th_dport()) in s.portfilter[dstip]:
-                    content.set_ip_dst(newTargetIp)
+                    content.set_ip_dst(s.newTargetIp)
                     child.set_th_sum(0)
                     child.auto_checksum = 1
                     if s.verbosity:
@@ -840,7 +840,7 @@ def tcpipfilter_out(packet):
             # Test for Port-dest hits on UDP.
             elif streamtype == 1:
                 if str(child.get_uh_dport()) in s.portfilter[dstip]:
-                    content.set_ip_dst(newTargetIp)
+                    content.set_ip_dst(s.newTargetIp)
                     child.set_uh_sum(0)
                     child.auto_checksum = 1
                 # Port not filtered -> drop
@@ -854,7 +854,7 @@ def tcpipfilter_out(packet):
         content.auto_checksum = 1
         packet = decpacket.get_packet()
         packet = vdepad(packet)
-        l34srcdstmap[srcp] = dstip
+        s.l34srcdstmap[srcp] = dstip
         return packet, 1
 
     # Identify ARP packets:
@@ -868,7 +868,7 @@ def tcpipfilter_out(packet):
         else:
             if s.verbosity:
                 s.logfile.write("Filtered ARP request. Redirecting...\n")
-            content.set_ar_tpa(map(int, newTargetIp.split('.')))
+            content.set_ar_tpa(map(int, s.newTargetIp.split('.')))
             packet = decpacket.get_packet()
             packet = vdepad(packet)
             return packet, 1
@@ -894,15 +894,15 @@ def tcpipfilter_in(packet):
     if content.ethertype == ImpactPacket.IP.ethertype:
         child = content.child()
         # Test for IP-dest hits.
-        if not content.get_ip_src() == newTargetIp:
+        if not content.get_ip_src() == s.newTargetIp:
             return orgpacket, 1
         else:
             if isinstance(child, ImpactPacket.TCP):
-                content.set_ip_src(l34srcdstmap[child.get_th_dport()])
+                content.set_ip_src(s.l34srcdstmap[child.get_th_dport()])
                 child.set_th_sum(0)
                 child.auto_checksum = 1
             elif isinstance(child, ImpactPacket.UDP):
-                content.set_ip_src(l34srcdstmap[child.get_uh_dport()])
+                content.set_ip_src(s.l34srcdstmap[child.get_uh_dport()])
                 child.set_uh_sum(0)
                 child.auto_checksum = 1                        
         content.auto_checksum = 1
@@ -913,7 +913,7 @@ def tcpipfilter_in(packet):
     elif content.ethertype == ImpactPacket.ARP.ethertype:
         sourceip = str(content.as_pro(content.get_ar_spa()))
         # Test for IP-dest hits.
-        if not sourceip == newTargetIp or content.get_ar_op() != 2:
+        if not sourceip == s.newTargetIp or content.get_ar_op() != 2:
             return orgpacket, 1
         else:
             if s.verbosity:
