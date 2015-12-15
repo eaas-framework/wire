@@ -311,7 +311,7 @@ def l4TCPmanage(ethhead, filedescriptor):
         # Send RST command.
         send(target, None, vdepad(cksum(con.reset(target))), 0)
         # Remove connection.
-        # TCPConnection.remove(con)
+        s.deletionList.append(con)
         return 0, con
 
     # If ACK flag is set from an active host, give the connection
