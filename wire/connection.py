@@ -402,7 +402,8 @@ class TCPConnection(Connection):
         """Method sending a given SYN packet to target. The SYN packet will be
         changed to not support TCPOPT_TIMESTAMP.
         """
-        iphead = ethhead.child()
+        eth = ethhead
+        iphead = eth.child()
         tcphead = iphead.child()
         if target == TCPConnection.TAIL:
             out = TCPConnection.alt_stdout
@@ -417,18 +418,19 @@ class TCPConnection(Connection):
         for option in tcphead.get_options():
             if option.get_kind() == ImpactPacket.TCPOption.TCPOPT_MAXSEG:
                 host.mss = option.get_mss()
-        # We need to check the availiable options and only delete the 
-        # TCP_TIMESTAMP option.
+        # We need to check the availiable options and only delete all 
+        # non MSS options. (TODO: Very bad practice. Do this properly!!)
         i = 0
         for option in tcphead.get_options():
-            if option.get_kind() == ImpactPacket.TCPOption.TCPOPT_TIMESTAMP:
+            if option.get_kind() != ImpactPacket.TCPOption.TCPOPT_MAXSEG:
                 # Bad practice, but seems like the only possible way.
                 tcphead._TCP__option_list[i] = nop
-                break
             i += 1
         # Recalculate the ipheader length
         iphead.set_ip_len(0)
-        packet = encode(ethhead)
+        packet = encode(eth)
+        if s.verbosity > 9:
+            s.logfile.write("Syn packet sent: " + str(eth) + "\n")
         send(target, self, packet)
 
     def validate(self, source, seqnr):

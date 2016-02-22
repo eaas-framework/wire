@@ -67,6 +67,8 @@ def init(path):
     if mode == 0:
         global newTargetIp
         newTargetIp = config.get('Filter', 'targetip')
+        global newTargetPort
+        newTargetPort = int(config.get('Filter', 'targetport'))
     # Get the verbosity for logging.
     global verbosity
     verbosity = config.getint('Log', 'verbosity')

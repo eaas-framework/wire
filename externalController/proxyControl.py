@@ -7,7 +7,6 @@ import connection as c
 
 ADDRESS = "/home/jotaro/uni/BA/scripts/socket.sock" # ("1.2.3.4", 8080)
 counter = 0
-CONNECTIONS = []
 
 try:
     os.remove(ADDRESS)
@@ -29,7 +28,6 @@ if __name__ == '__main__':
         client, addr = s.accept()
         print "New connection No. " + str(counter)
         con = c.Connection(client, addr, counter)
-        CONNECTIONS.append(con)
         counter += 1
 
 

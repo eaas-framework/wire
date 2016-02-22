@@ -1,0 +1,53 @@
+Logfile created: 2016-02-22 17:46:31.748292
+Starting in Mode 0
+Verbosity level set to 10
+Active ip-filters:
+98.137.201.117
+Active port-filters:
+98.137.201.117
+80
+IP packet on TCPIPFILTER_OUT. 
+Streamtype:1 
+No filterhit. IP-dest is:10.10.10.3
+IP packet on TCPIPFILTER_OUT. 
+Streamtype:1 
+No filterhit. IP-dest is:10.10.10.3
+IP packet on TCPIPFILTER_OUT. 
+Streamtype:0 
+Hit on port: 8080
+Redirecting to 132.230.3.2208080
+IP packet on TCPIPFILTER_OUT. 
+Streamtype:0 
+Hit on port: 8080
+Redirecting to 132.230.3.2208080
+IP packet on TCPIPFILTER_OUT. 
+Streamtype:0 
+Hit on port: 8080
+Redirecting to 132.230.3.2208080
+IP packet on TCPIPFILTER_OUT. 
+Streamtype:0 
+Hit on port: 8080
+Redirecting to 132.230.3.2208080
+ARP on TCPIPFILTER_OUT. Target: 10.10.10.3
+IP packet on TCPIPFILTER_OUT. 
+Streamtype:1 
+No filterhit. IP-dest is:10.10.10.3
+IP packet on TCPIPFILTER_OUT. 
+Streamtype:1 
+No filterhit. IP-dest is:10.10.10.3
+IP packet on TCPIPFILTER_OUT. 
+Streamtype:0 
+Hit on port: 8080
+Redirecting to 132.230.3.2208080
+IP packet on TCPIPFILTER_OUT. 
+Streamtype:0 
+Hit on port: 8080
+Redirecting to 132.230.3.2208080
+IP packet on TCPIPFILTER_OUT. 
+Streamtype:0 
+Hit on port: 8080
+Redirecting to 132.230.3.2208080
+IP packet on TCPIPFILTER_OUT. 
+Streamtype:0 
+Hit on port: 8080
+Redirecting to 132.230.3.2208080

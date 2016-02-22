@@ -16,26 +16,23 @@ def parseRequests(con):
     """Function processing the data in inp. Queue. 
     HTML request are manipulated."""
     while True:
-        if con.inputQueue.not_empty:
+        if not con.inputQueue.empty():
             data = con.inputQueue.get()
             print(con.number, data)
+
             con.outputQueue.put(data)
-        if con.remove and con.inputQueue.empty():
-            print "Removing parsing routine for" + con.number
+        elif con.remove:
+            print "Removing parsing routine for" + str(con.number)
             return
 
 def sendSock(con):
     """Function sending data back to the socket."""
     while True:
-        print "SendSock"
-        if con.outputQueue.not_empty:
+        if not con.outputQueue.empty():
             con.sock.send(con.outputQueue.get())
-        if con.remove and con.outputQueue.empty():
-            print "Removing sending routine for" + con.number
+        elif con.remove:
+            print "Removing sending routine for " + str(con.number)
             return
-        if con.remove:
-            print "Apparently, only remove is set."
-
 
 
 class Connection(object):
@@ -62,9 +59,7 @@ class Connection(object):
 
     def deletion(self):
         """Function initializing termination of all associated threads."""
-        print "Conneciton status:"
-        print "InputQueue: " + str(self.inputQueue)
-        print "OutputQueue: " + str(self.outputQueue)
         self.remove = True
         Connection.CONNECTIONS.remove(self)
+
     

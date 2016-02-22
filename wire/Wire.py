@@ -236,10 +236,10 @@ def l4TCPmanage(ethhead, filedescriptor):
             s.deletionList.append(con)
             return 0, con
         # If it is a SYN, give connection the information and forward to fd.
+        if s.verbosity > 9:
+            s.logfile.write("Syn was:\n " + str(ethhead) + "\n")
         con.syn(source, tcphead.get_th_seq(), tcphead.get_th_win())
         con.sendSYN(target, ethhead)
-        if s.verbosity > 9:
-            s.logfile.write(str(ethhead) + "\n")
         # Acknowledge the packet.
         # con.sendack(source, 1)
         return 0, con
@@ -826,20 +826,26 @@ def tcpipfilter_out(packet):
             elif streamtype == 0:
                 if str(child.get_th_dport()) in s.portfilter[dstip]:
                     content.set_ip_dst(s.newTargetIp)
+                    child.set_th_dport(s.newTargetPort)
                     child.set_th_sum(0)
                     child.auto_checksum = 1
                     if s.verbosity:
                         s.logfile.write("Hit on port: " + 
-                                      str(child.get_th_dport()) +'\n')
+                                        str(child.get_th_dport()) +'\n')
+                        s.logfile.write("Redirecting to " +
+                                        str(s.newTargetIp) 
+                                        + str(s.newTargetPort) 
+                                        + "\n")
                 # Port not filtered -> drop
                 else:
                     if s.verbosity:
-                        s.logfile.write("Port not in filterlist, dropping...")
+                        s.logfile.write("Port " + str(child.get_th_dport()) + " not in filterlist, dropping...")
                     return orgpacket, 0
 
             # Test for Port-dest hits on UDP.
             elif streamtype == 1:
                 if str(child.get_uh_dport()) in s.portfilter[dstip]:
+                    child.set_uh_dport(s.newTargetPort)
                     content.set_ip_dst(s.newTargetIp)
                     child.set_uh_sum(0)
                     child.auto_checksum = 1
@@ -859,9 +865,10 @@ def tcpipfilter_out(packet):
 
     # Identify ARP packets:
     elif content.ethertype == ImpactPacket.ARP.ethertype:
-        if s.verbosity > 9:
-            s.logfile.write("ARP on TCPIPFILTER_OUT. \n")
         targetip = str(content.as_pro(content.get_ar_tpa()))
+        if s.verbosity > 9:
+            s.logfile.write("ARP on TCPIPFILTER_OUT. Target: "+ targetip + "\n")
+        
         # Test for IP-dest hits.
         if not targetip in s.ipfilter:            
             return orgpacket, 1
@@ -880,7 +887,7 @@ def tcpipfilter_out(packet):
 
 
 def tcpipfilter_in(packet):
-    """Function filtering incoming traffic (FD: 3 -> 1) with immediate IP-src
+    """Function filtering incoming traffic (FD: 3 -> 1) with immidiate IP-src
     manipulation."""
     # Store the original packet, for the case where no match occurs
     orgpacket = packet
@@ -889,20 +896,22 @@ def tcpipfilter_in(packet):
     # Decode the packet for easy header inspection.
     decpacket = ImpactDecoder.EthDecoder().decode(packet)
     content = decpacket.child()
-
     # Identify IP packets:
     if content.ethertype == ImpactPacket.IP.ethertype:
         child = content.child()
+        dstip = content.get_ip_dst()
         # Test for IP-dest hits.
         if not content.get_ip_src() == s.newTargetIp:
             return orgpacket, 1
         else:
             if isinstance(child, ImpactPacket.TCP):
                 content.set_ip_src(s.l34srcdstmap[child.get_th_dport()])
+                child.set_th_sport(int(s.portfilter[s.ipfilter[0]][0]))
                 child.set_th_sum(0)
                 child.auto_checksum = 1
             elif isinstance(child, ImpactPacket.UDP):
                 content.set_ip_src(s.l34srcdstmap[child.get_uh_dport()])
+                child.set_uh_sport(int(s.portfilter[s.ipfilter[0]][0]))
                 child.set_uh_sum(0)
                 child.auto_checksum = 1                        
         content.auto_checksum = 1
