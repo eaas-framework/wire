@@ -1,12 +1,12 @@
-from Queue import Queue
+import Queue
 import threading
 import parsing
+import time
 
 def readSock(con):
     """Funciton reading data from socket and adding it to the inp. Queue."""
     while True:
         data = con.sock.recv(4096)
-        # TODO: Process and manipulate HTTP data.
         if len(data) < 1 or con.remove:
             print "reading socket on " + str(con.number) + " closed"
             con.deletion()
@@ -17,24 +17,33 @@ def parseRequests(con):
     """Function processing the data in inp. Queue. 
     HTML request are manipulated."""
     while True:
-        if not con.inputQueue.empty():
-            data = con.inputQueue.get()
+        try:
+            # No infinite blocking allowed, because deletion might be
+            # scheduled.
+            data = con.inputQueue.get(True, 0.2)
             print(con.number, data)
             data = parsing.httpReqMan(data)
             print(con.number, data)
             con.outputQueue.put(data)
-        elif con.remove:
-            print "Removing parsing routine for" + str(con.number)
-            return
+        except Queue.Empty:
+            # Iff Queue.Empty is raised, the thread is allowed to be
+            # removed.
+            if con.remove:
+                print "Removing parsing routine for " + str(con.number)
+                return
 
 def sendSock(con):
     """Function sending data back to the socket."""
     while True:
-        if not con.outputQueue.empty():
-            con.sock.send(con.outputQueue.get())
-        elif con.remove:
-            print "Removing sending routine for " + str(con.number)
-            return
+        # Implement delay for lower load.
+        try:
+            con.sock.send(con.outputQueue.get(True, 0.2))
+        except Queue.Empty:
+            # Iff Queue.Empty is raised, the connection is allowed to be
+            # removed.
+            if con.remove:
+                print "Removing sending routine for " + str(con.number)
+                return
 
 
 class Connection(object):
@@ -44,8 +53,8 @@ class Connection(object):
     def __init__(self, sock, address, counter):
         """Contructor."""
         Connection.CONNECTIONS.append(self)
-        self.inputQueue = Queue()
-        self.outputQueue = Queue()
+        self.inputQueue = Queue.Queue()
+        self.outputQueue = Queue.Queue()
         self.remove = False
         self.sock = sock
         self.number = counter

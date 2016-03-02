@@ -1,6 +1,7 @@
 import string
 HOST = "http://www.geocities.com/"
-AUTH = "YOU AUTH TOKEN"
+# Replace with your own auth token or path to it. Be careful not to upload it.
+AUTH = "YOUR TOKEN HERE"
 
 def httpReqMan(data):
     """Function parsing and changing a given HTTP-request,
