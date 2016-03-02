@@ -289,7 +289,7 @@ def l4TCPmanage(ethhead, filedescriptor):
         elif data and target == Connection.HEAD:
             tcphead.reset_FIN()
             new_packet = con.makevalid(ethhead)
-            new_packet = cksum(new_packet)
+            #new_packet = cksum(new_packet)
             new_packet = encode(new_packet)
             send(target, con, new_packet)
             con.fin(source, datalen)
@@ -365,8 +365,9 @@ def tcpretransmit():
         if hq:
             while (time() - hq[hq.smallest()][0]) > s.retranstime:
                 if s.verbosity or not s.verbosity:
-                    s.logfile.write("Head: Retransmission of ACKNr: "
-                                     + str(hq.smallest()) + "\n")
+                    s.logfile.write(str(time()) 
+                                    + " Head: Retransmission of ACKNr: "
+                                    + str(hq.smallest()) + "\n")
                 send(Connection.HEAD, con, hq[hq.smallest()][1], 0)
                 hq.pop_smallest()
                 if not hq:
@@ -375,8 +376,9 @@ def tcpretransmit():
         if tq:
             while (time() - tq[tq.smallest()][0]) > s.retranstime:
                 if s.verbosity or not s.verbosity:
-                    s.logfile.write("Tail: Retransmission of ACKNr: "
-                                     + str(tq.smallest()) + "\n")
+                    s.logfile.write(str(time()) 
+                                    + " Tail: Retransmission of ACKNr: "
+                                    + str(tq.smallest()) + "\n")
                 send(Connection.TAIL, con, tq[tq.smallest()][1], 0)
                 tq.pop_smallest()
                 if not tq:
@@ -471,8 +473,9 @@ def sendingRoutine():
         # Socket
         else:
             try:
-                s.logfile.write("Writing " + str(len(packet)) +
-                                " Bytes to socket. \n")
+                if s.verbosity:
+                    s.logfile.write("Writing " + str(len(packet)) +
+                                    " Bytes to socket. \n")
                 con.sock.send(packet)
             except socket.error:
                 s.reSendingQueue.put(packet)
@@ -489,9 +492,9 @@ def scheduledEvents():
     if not s.finQueue.empty():
         while (time() - s.finQueue.peek()[0]) > s.finTime:
             curtime, con, target = s.finQueue.get()
-            if s.verbosity or not s.verbosity:
+            if s.verbosity:
                 s.logfile.write("Sending FIN: "
-                                 + str(con.source) + "\n")
+                                + str(con.source) + "\n")
             con.sendfin(target, 0)
             if target == Connection.HEAD:
                 con.head.status = TCPHost.STATUS_CLOSE_WAIT

@@ -99,8 +99,9 @@ class Connection(object):
         Connection.poller.unregister(con.sock.fileno())
         Connection.fdtocon.pop(con.sock.fileno())
         con.sock.close()
-        s.logfile.write("Closing TCP-connection with source "
-                         + str(con.source[2]) + "\n")
+        if s.verbosity:
+            s.logfile.write("Closing TCP-connection with source "
+                            + str(con.source[2]) + "\n")
         s.deletionList.remove(con)
         TCPConnection.connectionlist.pop(con.source[2])
 
@@ -262,7 +263,7 @@ class TCPConnection(Connection):
                               + " are ACKed.\n")
 
         else:
-            if s.verbosity or not s.verbosity:
+            if s.verbosity:
                 s.logfile.write("ACK for unknown packet. ACKNr:"
                                  + str(acknr) + "\n")
         s.lock.release()

@@ -1,5 +1,6 @@
 from Queue import Queue
 import threading
+import parsing
 
 def readSock(con):
     """Funciton reading data from socket and adding it to the inp. Queue."""
@@ -19,7 +20,8 @@ def parseRequests(con):
         if not con.inputQueue.empty():
             data = con.inputQueue.get()
             print(con.number, data)
-
+            data = parsing.httpReqMan(data)
+            print(con.number, data)
             con.outputQueue.put(data)
         elif con.remove:
             print "Removing parsing routine for" + str(con.number)
